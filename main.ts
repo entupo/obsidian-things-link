@@ -1,4 +1,4 @@
-import { Editor, EditorPosition, MarkdownView, Plugin, Vault, Workspace, App } from 'obsidian';
+import { Editor, MarkdownView, Plugin } from 'obsidian';
 
 
 function getCurrentLine(editor: Editor, view: MarkdownView) {
@@ -20,6 +20,48 @@ function prepareTask(line: string) {
 function urlEncode(line: string) {
 	line = encodeURIComponent(line)
 	return line
+}
+
+function getThingsNoteLink(fileUrl: string) {
+	try {
+		const parsedUrl = new URL(fileUrl)
+		const filePath = parsedUrl.searchParams.get('file')
+		if (filePath == null) {
+			return fileUrl
+		}
+
+		const segments = filePath.split('/').filter(Boolean)
+		const fileName = segments.length > 0 ? segments[segments.length - 1] : filePath
+		return `obsidian://open?file=${encodeURIComponent(fileName)}`
+	} catch {
+		return fileUrl
+	}
+}
+
+function upsertYamlUrl(editor: Editor, thingsDeepLink: string) {
+	const fileText = editor.getValue()
+	const lines = fileText.split('\n')
+	const urlLine = `url: ${thingsDeepLink}`
+
+	if (lines[0] === '---') {
+		const closingIndex = lines.findIndex((line, index) => index > 0 && line === '---')
+		if (closingIndex !== -1) {
+			const frontmatter = lines.slice(1, closingIndex)
+			const urlIndex = frontmatter.findIndex((line) => /^url\s*:/.test(line))
+			if (urlIndex !== -1) {
+				frontmatter[urlIndex] = urlLine
+			} else {
+				frontmatter.push(urlLine)
+			}
+
+			const updatedText = ['---', ...frontmatter, '---', ...lines.slice(closingIndex + 1)].join('\n')
+			editor.setValue(updatedText)
+			return
+		}
+	}
+
+	const frontmatterBlock = ['---', urlLine, '---', ''].join('\n')
+	editor.setValue(frontmatterBlock + fileText)
 }
 
 
@@ -47,30 +89,7 @@ export default class ThingsLink extends Plugin {
 			} else {
 				const editor = view.editor
 				const thingsDeepLink = `things:///show?id=${projectID}`;
-				let fileText = editor.getValue()
-				const lines = fileText.split('\n');
-				const h1Index = lines.findIndex(line => line.startsWith('#'));
-				if (h1Index !== -1) {
-					let startRange: EditorPosition = {
-						line: h1Index,
-						ch:lines[h1Index].length
-					}
-					let endRange: EditorPosition = {
-						line: h1Index,
-						ch:lines[h1Index].length
-					}
-					editor.replaceRange(`\n\n[Things](${thingsDeepLink})`, startRange, endRange);
-				} else {
-						let startRange: EditorPosition = {
-						line: 0,
-						ch:0
-					}
-					let endRange: EditorPosition = {
-						line: 0,
-						ch:0
-					}
-					editor.replaceRange(`[Things](${thingsDeepLink})\n\n`, startRange, endRange);
-				}
+				upsertYamlUrl(editor, thingsDeepLink)
 			}
 		});
 		
@@ -86,7 +105,8 @@ export default class ThingsLink extends Plugin {
 					let fileName = urlEncode(fileTitle.name)
 					fileName = fileName.replace(/\.md$/, '')
 					const obsidianDeepLink = (this.app as any).getObsidianUrl(fileTitle)
-					const encodedLink = urlEncode(obsidianDeepLink)
+					const thingsNoteLink = getThingsNoteLink(obsidianDeepLink)
+					const encodedLink = urlEncode(thingsNoteLink)
 					createProject(fileName, encodedLink);
 				}
 			}
@@ -99,20 +119,8 @@ export default class ThingsLink extends Plugin {
 				return;
 			} else {
 				const editor = view.editor
-				const currentLine = getCurrentLine(editor, view)
-				const firstLetterIndex = currentLine.search(/[a-zA-Z]|[0-9]/);
-				const line = currentLine.substring(firstLetterIndex, currentLine.length)
-				let editorPosition = view.editor.getCursor()
-				const lineLength = view.editor.getLine(editorPosition.line).length
-				let startRange: EditorPosition = {
-					line: editorPosition.line,
-					ch: firstLetterIndex
-				}
-				let endRange: EditorPosition = {
-					line: editorPosition.line,
-					ch: lineLength
-				}
-				view.editor.replaceRange(`[${line}](things:///show?id=${taskID})`, startRange, endRange);
+				const thingsDeepLink = `things:///show?id=${taskID}`
+				upsertYamlUrl(editor, thingsDeepLink)
 			}
 		});
 	
@@ -129,7 +137,8 @@ export default class ThingsLink extends Plugin {
 					let fileName = urlEncode(fileTitle.name)
 					fileName = fileName.replace(/\.md$/, '')
 					const obsidianDeepLink = (this.app as any).getObsidianUrl(fileTitle)
-					const encodedLink = urlEncode(obsidianDeepLink)
+					const thingsNoteLink = getThingsNoteLink(obsidianDeepLink)
+					const encodedLink = urlEncode(thingsNoteLink)
 					const line = getCurrentLine(editor, view)
 					const task = prepareTask(line)
 					createTask(task, encodedLink)
